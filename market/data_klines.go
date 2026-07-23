@@ -69,7 +69,10 @@ func getKlinesFromCoinAnk(symbol, interval, exchange string, limit int) ([]Kline
 	case "aster":
 		coinankExchange = coinank_enum.Aster
 	default:
-		// Default to Binance for unknown exchanges
+		// Default to Binance for unknown exchanges. Loud on purpose: the AI
+		// is now looking at Binance's order flow while executing elsewhere,
+		// which can diverge on thin pairs (kucoin/lighter/indodax land here).
+		logger.Warnf("⚠️ Exchange %q has no CoinAnk kline mapping — using BINANCE data for %s %s; decision data and execution venue diverge", exchange, symbol, interval)
 		coinankExchange = coinank_enum.Binance
 	}
 

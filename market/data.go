@@ -111,14 +111,14 @@ func GetWithExchange(symbol, exchange string) (*Data, error) {
 	}
 
 	// Get OI data
-	oiData, err := getOpenInterestData(symbol)
+	oiData, err := getOpenInterestData(symbol, exchange)
 	if err != nil {
 		// OI failure doesn't affect overall result, use default values
 		oiData = &OIData{Latest: 0, Average: 0}
 	}
 
 	// Get Funding Rate
-	fundingRate, _ := getFundingRate(symbol)
+	fundingRate, _ := getFundingRate(symbol, exchange)
 
 	// Calculate intraday series data
 	intradayData := calculateIntradaySeries(klines3m)
@@ -146,7 +146,17 @@ func GetWithExchange(symbol, exchange string) (*Data, error) {
 // primaryTimeframe: primary timeframe (used for calculating current indicators), defaults to timeframes[0]
 // count: number of K-lines for each timeframe
 func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe string, count int) (*Data, error) {
+	return GetWithTimeframesExchange(symbol, "binance", timeframes, primaryTimeframe, count)
+}
+
+// GetWithTimeframesExchange is GetWithTimeframes with an explicit exchange so
+// the decision engine sees the same venue's market data it will trade on.
+// An empty exchange falls back to Binance.
+func GetWithTimeframesExchange(symbol, exchange string, timeframes []string, primaryTimeframe string, count int) (*Data, error) {
 	symbol = Normalize(symbol)
+	if exchange == "" {
+		exchange = "binance"
+	}
 
 	if len(timeframes) == 0 {
 		return nil, fmt.Errorf("at least one timeframe is required")
@@ -175,24 +185,25 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 
 	// Check if this is an xyz dex asset (use Hyperliquid API)
 	isXyzAsset := IsXyzDexAsset(symbol)
+	useHyperliquidAPI := isXyzAsset || strings.EqualFold(exchange, "hyperliquid")
 
 	// Get K-line data for each timeframe
 	for _, tf := range timeframes {
 		var klines []Kline
 		var err error
 
-		if isXyzAsset {
-			// Use Hyperliquid API for xyz dex assets
+		if useHyperliquidAPI {
+			// Use Hyperliquid API for xyz dex assets and Hyperliquid traders
 			klines, err = getKlinesFromHyperliquid(symbol, tf, 200)
 			if err != nil {
 				logger.Infof("⚠️ Failed to get %s %s K-line from Hyperliquid: %v", symbol, tf, err)
 				continue
 			}
 		} else {
-			// Use CoinAnk for regular crypto assets (default to Binance)
-			klines, err = getKlinesFromCoinAnk(symbol, tf, "binance", 200)
+			// Use CoinAnk with the trader's own exchange (falls back to Binance inside)
+			klines, err = getKlinesFromCoinAnk(symbol, tf, exchange, 200)
 			if err != nil {
-				logger.Infof("⚠️ Failed to get %s %s K-line from CoinAnk: %v", symbol, tf, err)
+				logger.Infof("⚠️ Failed to get %s %s K-line from CoinAnk (%s): %v", symbol, tf, exchange, err)
 				continue
 			}
 		}
@@ -234,13 +245,13 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 	priceChange4h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 240) // 4 hours
 
 	// Get OI data
-	oiData, err := getOpenInterestData(symbol)
+	oiData, err := getOpenInterestData(symbol, exchange)
 	if err != nil {
 		oiData = &OIData{Latest: 0, Average: 0}
 	}
 
 	// Get Funding Rate
-	fundingRate, _ := getFundingRate(symbol)
+	fundingRate, _ := getFundingRate(symbol, exchange)
 
 	return &Data{
 		Symbol:        symbol,
@@ -256,8 +267,70 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 	}, nil
 }
 
-// getOpenInterestData retrieves OI data
-func getOpenInterestData(symbol string) (*OIData, error) {
+// bybitLinearTicker holds the fields we need from Bybit's v5 tickers endpoint.
+// One call returns both open interest and funding rate for a linear contract.
+type bybitLinearTicker struct {
+	OpenInterest float64
+	FundingRate  float64
+}
+
+// getBybitLinearTicker fetches OI + funding rate from Bybit's own public API,
+// so Bybit traders see their venue's numbers instead of Binance's.
+func getBybitLinearTicker(symbol string) (*bybitLinearTicker, error) {
+	url := fmt.Sprintf("https://api.bybit.com/v5/market/tickers?category=linear&symbol=%s", symbol)
+
+	apiClient := NewAPIClient()
+	resp, err := apiClient.client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		RetCode int    `json:"retCode"`
+		RetMsg  string `json:"retMsg"`
+		Result  struct {
+			List []struct {
+				Symbol       string `json:"symbol"`
+				OpenInterest string `json:"openInterest"`
+				FundingRate  string `json:"fundingRate"`
+			} `json:"list"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+	if result.RetCode != 0 || len(result.Result.List) == 0 {
+		return nil, fmt.Errorf("bybit tickers %s: retCode=%d msg=%s items=%d",
+			symbol, result.RetCode, result.RetMsg, len(result.Result.List))
+	}
+
+	t := result.Result.List[0]
+	oi, _ := strconv.ParseFloat(t.OpenInterest, 64)
+	fr, _ := strconv.ParseFloat(t.FundingRate, 64)
+	return &bybitLinearTicker{OpenInterest: oi, FundingRate: fr}, nil
+}
+
+// getOpenInterestData retrieves OI data from the trader's own exchange when
+// supported (currently Bybit); other venues fall back to Binance futures.
+func getOpenInterestData(symbol, exchange string) (*OIData, error) {
+	if strings.EqualFold(exchange, "bybit") {
+		ticker, err := getBybitLinearTicker(symbol)
+		if err == nil {
+			return &OIData{
+				Latest:  ticker.OpenInterest,
+				Average: ticker.OpenInterest * 0.999, // Approximate average
+			}, nil
+		}
+		logger.Warnf("⚠️ Bybit OI for %s failed, falling back to Binance: %v", symbol, err)
+	}
+
 	url := fmt.Sprintf("https://fapi.binance.com/fapi/v1/openInterest?symbol=%s", symbol)
 
 	apiClient := NewAPIClient()
@@ -291,15 +364,29 @@ func getOpenInterestData(symbol string) (*OIData, error) {
 }
 
 // getFundingRate retrieves funding rate (optimized: uses 1-hour cache)
-func getFundingRate(symbol string) (float64, error) {
-	// Check cache (1-hour validity)
+func getFundingRate(symbol, exchange string) (float64, error) {
+	// Check cache (1-hour validity), keyed per exchange so venues don't mix.
 	// Funding Rate only updates every 8 hours, 1-hour cache is very reasonable
-	if cached, ok := fundingRateMap.Load(symbol); ok {
+	cacheKey := strings.ToLower(exchange) + ":" + symbol
+	if cached, ok := fundingRateMap.Load(cacheKey); ok {
 		cache := cached.(*FundingRateCache)
 		if time.Since(cache.UpdatedAt) < frCacheTTL {
 			// Cache hit, return directly
 			return cache.Rate, nil
 		}
+	}
+
+	// Bybit traders read Bybit's own funding rate.
+	if strings.EqualFold(exchange, "bybit") {
+		ticker, err := getBybitLinearTicker(symbol)
+		if err == nil {
+			fundingRateMap.Store(cacheKey, &FundingRateCache{
+				Rate:      ticker.FundingRate,
+				UpdatedAt: time.Now(),
+			})
+			return ticker.FundingRate, nil
+		}
+		logger.Warnf("⚠️ Bybit funding rate for %s failed, falling back to Binance: %v", symbol, err)
 	}
 
 	// Cache expired or doesn't exist, call API
@@ -334,7 +421,7 @@ func getFundingRate(symbol string) (float64, error) {
 	rate, _ := strconv.ParseFloat(result.LastFundingRate, 64)
 
 	// Update cache
-	fundingRateMap.Store(symbol, &FundingRateCache{
+	fundingRateMap.Store(cacheKey, &FundingRateCache{
 		Rate:      rate,
 		UpdatedAt: time.Now(),
 	})

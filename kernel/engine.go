@@ -190,6 +190,16 @@ type StrategyEngine struct {
 	nofxosClient       *nofxos.Client
 	vergexClient       *vergex.Client
 	vergexRankingCache map[string]*vergex.SignalRankItem
+	// exchange is the venue this engine's trader executes on. Market data for
+	// decisions is fetched from this venue so the AI sees the same prices,
+	// OI and funding it will actually trade against. Empty means Binance.
+	exchange string
+}
+
+// SetExchange records the trader's execution venue so decision-time market
+// data comes from the same exchange the orders will land on.
+func (e *StrategyEngine) SetExchange(exchange string) {
+	e.exchange = exchange
 }
 
 // NewStrategyEngine creates strategy execution engine.
@@ -938,8 +948,12 @@ func withDefaultText(value, fallback string) string {
 // External & Quant Data
 // ============================================================================
 
-// FetchMarketData fetches market data based on strategy configuration
+// FetchMarketData fetches market data based on strategy configuration,
+// using the trader's own exchange as the data venue.
 func (e *StrategyEngine) FetchMarketData(symbol string) (*market.Data, error) {
+	if e.exchange != "" {
+		return market.GetWithExchange(symbol, e.exchange)
+	}
 	return market.Get(symbol)
 }
 

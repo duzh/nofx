@@ -372,6 +372,10 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		claw402Key = config.CustomAPIKey
 	}
 	strategyEngine := kernel.NewStrategyEngine(config.StrategyConfig, claw402Key)
+	// Decision-time market data must come from the venue we execute on,
+	// not the Binance default — otherwise the AI trades Bybit prices it
+	// never saw (and vice versa).
+	strategyEngine.SetExchange(config.Exchange)
 	logger.Infof("✓ [%s] Using strategy engine (strategy configuration loaded)", config.Name)
 
 	return &AutoTrader{
@@ -436,6 +440,7 @@ func (at *AutoTrader) reloadStrategyConfigIfChanged() error {
 	at.config.StrategyConfig = strategyConfig
 	at.config.StrategyConfigRaw = strategy.Config
 	at.strategyEngine = kernel.NewStrategyEngine(strategyConfig, claw402Key)
+	at.strategyEngine.SetExchange(at.exchange)
 	at.logInfof("🔄 Strategy config refreshed from DB: %s", strategy.Name)
 	return nil
 }
