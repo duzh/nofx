@@ -295,10 +295,84 @@ func (t *BybitTrader) SyncOrdersFromBybit(traderID string, exchangeID string, ex
 	}
 
 	logger.Infof("✅ Bybit order sync completed: %d new trades synced", syncedCount)
+
+	// Reconcile local OPEN rows against Bybit's live book — same self-healing
+	// the Hyperliquid sync has. Fill-window gaps leave zombie OPEN rows
+	// (positions the exchange no longer holds) that poison the dashboard
+	// stats and the AI's own track-record context until force-closed here.
+	if err := t.reconcilePositions(exchangeID, positionStore); err != nil {
+		logger.Infof("⚠️ Bybit position reconcile skipped: %v", err)
+	}
+
 	return nil
 }
 
 // StartOrderSync starts background order sync task for Bybit
+// reconcilePositions builds the live (symbol, side) → quantity map from
+// Bybit and lets the store close/trim any local OPEN rows on this exchange
+// account the exchange no longer backs.
+func (t *BybitTrader) reconcilePositions(exchangeID string, positionStore *store.PositionStore) error {
+	livePositions, err := t.GetPositions()
+	if err != nil {
+		return fmt.Errorf("failed to get live positions: %w", err)
+	}
+
+	buildQty := func(list []map[string]interface{}) map[string]float64 {
+		m := make(map[string]float64, len(list))
+		for _, pos := range list {
+			symbol, _ := pos["symbol"].(string)
+			side, _ := pos["side"].(string)
+			qty, _ := pos["positionAmt"].(float64)
+			if symbol == "" || qty <= 0 {
+				continue
+			}
+			m[store.LivePositionKey(symbol, side)] += qty
+		}
+		return m
+	}
+	liveQty := buildQty(livePositions)
+
+	// An empty live book mass-closes every local row, so it must never be
+	// trusted from a single read: right after a restart (or on a transient
+	// API hiccup) GetPositions can return an empty list without an error —
+	// observed live, wiping rows for positions the exchange still held.
+	// Invalidate the cache, wait out its TTL, and only proceed if the book
+	// is empty on a second, fresh read.
+	if len(liveQty) == 0 {
+		t.positionsCacheMutex.Lock()
+		t.cachedPositions = nil
+		t.positionsCacheMutex.Unlock()
+		time.Sleep(t.cacheDuration + time.Second)
+
+		livePositions, err = t.GetPositions()
+		if err != nil {
+			return fmt.Errorf("failed to confirm empty live book: %w", err)
+		}
+		liveQty = buildQty(livePositions)
+		if len(liveQty) > 0 {
+			logger.Infof("⚠️ Bybit reconcile: first read returned an empty book but re-read found %d live position(s) — transient empty ignored", len(liveQty))
+		}
+	}
+
+	// Time lock: an empty book only becomes trustworthy after it has stayed
+	// empty for a full safety window. Empty reads were observed within a
+	// minute of process restarts while the exchange verifiably still held
+	// positions (margin in use, throttle tracking hold times).
+	const emptyBookTrustWindow = 10 * time.Minute
+	if len(liveQty) == 0 {
+		if time.Since(t.lastLiveNonEmptyAt) < emptyBookTrustWindow {
+			logger.Infof("⏳ Bybit reconcile: empty live book not yet trusted (last non-empty %s ago < %s) — skipping this pass",
+				time.Since(t.lastLiveNonEmptyAt).Round(time.Second), emptyBookTrustWindow)
+			return nil
+		}
+	} else {
+		t.lastLiveNonEmptyAt = time.Now()
+	}
+
+	_, err = positionStore.ReconcileOpenPositionsWithLive(exchangeID, liveQty)
+	return err
+}
+
 func (t *BybitTrader) StartOrderSync(traderID string, exchangeID string, exchangeType string, st *store.Store, interval time.Duration, stop <-chan struct{}) {
 	syncloop.Run(stop, interval, "Bybit", func() error {
 		return t.SyncOrdersFromBybit(traderID, exchangeID, exchangeType, st)

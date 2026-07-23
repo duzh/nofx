@@ -37,6 +37,12 @@ type BybitTrader struct {
 
 	// Cache duration (15 seconds)
 	cacheDuration time.Duration
+
+	// lastLiveNonEmptyAt is the last time the live position book was seen
+	// non-empty. Reconcile refuses to mass-close on an empty book unless it
+	// has stayed empty for a safety window — GetPositions was observed
+	// returning transient empty lists right after process restarts.
+	lastLiveNonEmptyAt time.Time
 }
 
 // NewBybitTrader creates a Bybit trader
@@ -70,6 +76,9 @@ func NewBybitTrader(apiKey, secretKey string) *BybitTrader {
 		secretKey:     secretKey,
 		cacheDuration: 15 * time.Second,
 		qtyStepCache:  make(map[string]float64),
+		// Assume the book was recently non-empty so an empty read right
+		// after startup can never mass-close local rows.
+		lastLiveNonEmptyAt: time.Now(),
 	}
 
 	logger.Infof("🔵 [Bybit] Trader initialized")

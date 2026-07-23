@@ -11,6 +11,13 @@ import (
 
 const reconcileQuantityTolerance = 0.0001
 
+// reconcileFreshRowGraceMs protects rows opened moments ago: the exchange's
+// position endpoint (often cached) can lag the execution feed by seconds, so
+// a row created from a just-filled open would be seen as "not held" and
+// wrongly zombie-closed in the same sync pass that created it (observed live
+// on Bybit: row created and reconcile-closed within the same second).
+const reconcileFreshRowGraceMs = 3 * 60 * 1000
+
 // LivePositionKey builds the map key used by ReconcileOpenPositionsWithLive.
 func LivePositionKey(symbol, side string) string {
 	return strings.ToUpper(strings.TrimSpace(symbol)) + "|" + strings.ToUpper(strings.TrimSpace(side))
@@ -58,6 +65,13 @@ func (s *PositionStore) ReconcileOpenPositionsWithLive(exchangeID string, liveQt
 	closed := 0
 
 	for _, row := range openRows {
+		// Freshly opened rows are exempt: the live book may not reflect the
+		// fill yet, and closing them here orphans the position's bookkeeping.
+		if row.EntryTime > 0 && nowMs-row.EntryTime < reconcileFreshRowGraceMs {
+			logger.Infof("  ⏳ Reconcile: skipping fresh %s %s row %d (opened %ds ago)", row.Symbol, row.Side, row.ID, (nowMs-row.EntryTime)/1000)
+			continue
+		}
+
 		key := LivePositionKey(row.Symbol, row.Side)
 		live := remaining[key]
 
