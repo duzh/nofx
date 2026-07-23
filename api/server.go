@@ -11,6 +11,7 @@ import (
 	"nofx/manager"
 	"nofx/store"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -59,7 +60,40 @@ func NewServer(traderManager *manager.TraderManager, st *store.Store, cryptoServ
 	// Setup routes
 	s.setupRoutes()
 
+	// Serve the built frontend when web/dist exists (single-binary file
+	// deploys without the nginx container). API routes stay under /api;
+	// unknown paths fall back to index.html for SPA client-side routing.
+	distDir := os.Getenv("FRONTEND_DIST_DIR")
+	if distDir == "" {
+		distDir = "web/dist"
+	}
+	if indexPath := filepath.Join(distDir, "index.html"); fileExists(indexPath) {
+		router.Static("/assets", filepath.Join(distDir, "assets"))
+		router.StaticFile("/", indexPath)
+		router.NoRoute(func(c *gin.Context) {
+			p := c.Request.URL.Path
+			if strings.HasPrefix(p, "/api/") {
+				c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+				return
+			}
+			// Serve real files (favicon, icons, manifest); everything else
+			// falls back to the SPA entry point.
+			candidate := filepath.Join(distDir, filepath.Clean("/"+p))
+			if fileExists(candidate) {
+				c.File(candidate)
+				return
+			}
+			c.File(indexPath)
+		})
+		logger.Infof("🖥  Serving frontend from %s", distDir)
+	}
+
 	return s
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // corsMiddleware returns a CORS handler. Origins come from CORS_ALLOWED_ORIGINS
