@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { DecisionRecord } from '../../types'
 
 /**
@@ -52,8 +52,14 @@ type LogTone = 'ok' | 'warn' | 'risk' | 'info'
 // Classify an execution-log line into a tone for color-coding.
 function logTone(line: string): LogTone {
   const s = line.toLowerCase()
-  if (s.includes('succeed') || s.includes('success') || line.includes('✓')) return 'ok'
-  if (s.includes('throttle') || s.includes('re-entry') || s.includes('cooldown') || s.includes('blocked'))
+  if (s.includes('succeed') || s.includes('success') || line.includes('✓'))
+    return 'ok'
+  if (
+    s.includes('throttle') ||
+    s.includes('re-entry') ||
+    s.includes('cooldown') ||
+    s.includes('blocked')
+  )
     return 'warn'
   if (
     s.includes('risk') ||
@@ -74,7 +80,12 @@ const TONE_COLOR: Record<LogTone, string> = {
   risk: 'var(--tm-dn)',
   info: 'var(--tm-ink-2)',
 }
-const TONE_GLYPH: Record<LogTone, string> = { ok: '✓', warn: '⚠', risk: '❌', info: '·' }
+const TONE_GLYPH: Record<LogTone, string> = {
+  ok: '✓',
+  warn: '⚠',
+  risk: '❌',
+  info: '·',
+}
 
 /**
  * Tidy a verbose execution-log string to its gist without fabricating data.
@@ -85,14 +96,19 @@ const TONE_GLYPH: Record<LogTone, string> = { ok: '✓', warn: '⚠', risk: '❌
 function cleanLog(raw: string): string {
   let s = raw.replace(/^[\s└>•·]*[✓✗⚠❌]?\s*/, '').trim()
 
-  const throttle = s.match(/closed\s+([0-9smhd.]+)\s+ago;\s*wait\s+([0-9smhd.]+)/i)
+  const throttle = s.match(
+    /closed\s+([0-9smhd.]+)\s+ago;\s*wait\s+([0-9smhd.]+)/i
+  )
   if (throttle) {
     const ago = throttle[1].replace(/(\d)0s$/, '$1').replace(/0s$/, '')
     const wait = throttle[2].replace(/(\d)0s$/, '$1').replace(/0s$/, '')
     return `throttle · closed ${ago} ago, wait ${wait}`
   }
   // drop a redundant leading "SYMBOL action" prefix when present
-  s = s.replace(/^[A-Z0-9:_-]{2,12}\s+(open_long|open_short|close_long|close_short)\s+/i, '')
+  s = s.replace(
+    /^[A-Z0-9:_-]{2,12}\s+(open_long|open_short|close_long|close_short)\s+/i,
+    ''
+  )
   return s
 }
 
@@ -111,11 +127,23 @@ export function ExecutionLog({ decisions, height = 440 }: ExecutionLogProps) {
   return (
     <div style={{ fontFamily: 'var(--tm-mono)' }}>
       {/* header */}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
-        <span className="tm-px" style={{ fontSize: 11 }}>Execution log</span>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 8,
+          marginBottom: 2,
+        }}
+      >
+        <span className="tm-px" style={{ fontSize: 11 }}>
+          Execution log
+        </span>
         <span
           className="tm-sc"
-          style={{ marginLeft: 'auto', color: cycles.length ? 'var(--tm-up)' : 'var(--tm-muted)' }}
+          style={{
+            marginLeft: 'auto',
+            color: cycles.length ? 'var(--tm-up)' : 'var(--tm-muted)',
+          }}
         >
           {cycles.length ? `${cycles.length} cyc` : '—'}
         </span>
@@ -127,7 +155,13 @@ export function ExecutionLog({ decisions, height = 440 }: ExecutionLogProps) {
       {/* legend */}
       <div
         className="tm-sc"
-        style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 6, fontSize: 9 }}
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 12,
+          marginBottom: 6,
+          fontSize: 9,
+        }}
       >
         <Legend glyph="✓" c="var(--tm-up)" label="ok" />
         <Legend glyph="⚠" c={C_AMBER} label="throttle" />
@@ -137,7 +171,9 @@ export function ExecutionLog({ decisions, height = 440 }: ExecutionLogProps) {
       <div className="tm-hair" style={{ marginBottom: 0 }} />
 
       {!cycles.length ? (
-        <div className="tm-sc" style={{ padding: '16px 0' }}>No execution events yet.</div>
+        <div className="tm-sc" style={{ padding: '16px 0' }}>
+          No execution events yet.
+        </div>
       ) : (
         <div
           style={{
@@ -157,7 +193,15 @@ export function ExecutionLog({ decisions, height = 440 }: ExecutionLogProps) {
   )
 }
 
-function Legend({ glyph, c, label }: { glyph: string; c: string; label: string }) {
+function Legend({
+  glyph,
+  c,
+  label,
+}: {
+  glyph: string
+  c: string
+  label: string
+}) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
       <span style={{ color: c, fontSize: 10 }}>{glyph}</span>
@@ -171,10 +215,17 @@ interface CycleProps {
 }
 
 function Cycle({ record }: CycleProps) {
+  const [expanded, setExpanded] = useState(false)
   const time = fmtTime(record.timestamp)
   const actions = record.decisions ?? []
   const logs = record.execution_log ?? []
   const count = actions.length
+  const hasDetail = Boolean(
+    record.cot_trace ||
+    record.decision_json ||
+    record.system_prompt ||
+    record.input_prompt
+  )
 
   return (
     <div style={{ borderBottom: '1px solid var(--tm-hair)', padding: '5px 0' }}>
@@ -187,22 +238,65 @@ function Cycle({ record }: CycleProps) {
           gap: 7,
           fontSize: 9,
           padding: '2px 6px',
-          marginBottom: actions.length || logs.length || record.error_message ? 4 : 0,
+          marginBottom:
+            actions.length || logs.length || record.error_message ? 4 : 0,
           background: 'rgba(26,24,19,0.045)',
           borderLeft: `2px solid ${record.success ? 'var(--tm-hair)' : 'var(--tm-dn)'}`,
           color: 'var(--tm-ink-2)',
         }}
       >
-        <span style={{ color: 'var(--tm-ink)', fontWeight: 700 }}>CYCLE {record.cycle_number}</span>
+        <span style={{ color: 'var(--tm-ink)', fontWeight: 700 }}>
+          CYCLE {record.cycle_number}
+        </span>
         <span style={{ color: 'var(--tm-muted)' }}>·</span>
         <span style={{ color: 'var(--tm-muted)' }}>{time}</span>
         <span style={{ marginLeft: 'auto', color: 'var(--tm-muted)' }}>
           {count === 0 ? 'no action' : `${count} action${count > 1 ? 's' : ''}`}
         </span>
+        {hasDetail ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            style={{
+              background: 'none',
+              border: '1px solid var(--tm-hair)',
+              borderRadius: 2,
+              color: 'var(--tm-ink-2)',
+              fontSize: 9,
+              padding: '0 5px',
+              cursor: 'pointer',
+              lineHeight: '14px',
+            }}
+          >
+            {expanded ? '▾ detail' : '▸ detail'}
+          </button>
+        ) : null}
         {!record.success ? (
           <span style={{ color: 'var(--tm-dn)', fontWeight: 700 }}>FAULT</span>
         ) : null}
       </div>
+
+      {/* expanded detail: AI reasoning, decision JSON, prompts */}
+      {expanded ? (
+        <div style={{ padding: '2px 6px 4px' }}>
+          <DetailBlock
+            label="AI Reasoning (chain of thought)"
+            text={record.cot_trace}
+          />
+          <DetailBlock
+            label="Decision (raw JSON)"
+            text={prettyJson(record.decision_json)}
+          />
+          <DetailBlock
+            label="Input Prompt (market context sent to the AI)"
+            text={record.input_prompt}
+          />
+          <DetailBlock
+            label="System Prompt (strategy rules)"
+            text={record.system_prompt}
+          />
+        </div>
+      ) : null}
 
       {/* AI action lines */}
       {actions.map((a, i) => {
@@ -219,21 +313,50 @@ function Cycle({ record }: CycleProps) {
               color: 'var(--tm-ink-2)',
             }}
           >
-            <span style={{ color: 'var(--tm-muted)', flex: '0 0 auto', minWidth: 52 }}>
+            <span
+              style={{
+                color: 'var(--tm-muted)',
+                flex: '0 0 auto',
+                minWidth: 52,
+              }}
+            >
               {aTime !== '--:--:--' ? aTime : time}
             </span>
             <ActionBadge action={a.action} side={side} />
-            <span style={{ color: 'var(--tm-ink)', fontWeight: 600, flex: '0 0 auto', minWidth: 48 }}>
+            <span
+              style={{
+                color: 'var(--tm-ink)',
+                fontWeight: 600,
+                flex: '0 0 auto',
+                minWidth: 48,
+              }}
+            >
               {baseSymbol(a.symbol)}
             </span>
             {a.confidence != null ? (
               <span style={{ color: 'var(--tm-muted)', flex: '0 0 auto' }}>
-                conf<span style={{ color: 'var(--tm-ink-2)' }}>{Math.round(a.confidence)}</span>
+                conf
+                <span style={{ color: 'var(--tm-ink-2)' }}>
+                  {Math.round(a.confidence)}
+                </span>
               </span>
             ) : null}
           </div>
         )
       })}
+
+      {/* per-action reasoning, shown when the cycle is expanded */}
+      {expanded
+        ? actions
+            .filter((a) => a.reasoning)
+            .map((a, i) => (
+              <SubLine
+                key={`reason-${i}`}
+                tone="info"
+                text={`${baseSymbol(a.symbol)}: ${a.reasoning}`}
+              />
+            ))
+        : null}
 
       {/* execution-log result sub-lines */}
       {logs.map((line, i) => (
@@ -277,6 +400,66 @@ function ActionBadge({ action, side }: { action: string; side: Side }) {
   )
 }
 
+// Pretty-print a JSON string; fall back to the raw text if it isn't JSON.
+function prettyJson(raw: string | undefined): string {
+  if (!raw) return ''
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+}
+
+// Collapsible monospace block for reasoning / decision / prompt payloads.
+function DetailBlock({ label, text }: { label: string; text?: string }) {
+  const [open, setOpen] = useState(false)
+  if (!text || !text.trim()) return null
+  return (
+    <div style={{ marginBottom: 4 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="tm-sc"
+        style={{
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          fontSize: 9,
+          color: 'var(--tm-ink-2)',
+          cursor: 'pointer',
+          fontWeight: 700,
+        }}
+      >
+        {open ? '▾' : '▸'} {label}
+        <span style={{ color: 'var(--tm-muted)', fontWeight: 400 }}>
+          {' '}
+          · {text.length.toLocaleString()} chars
+        </span>
+      </button>
+      {open ? (
+        <pre
+          style={{
+            margin: '3px 0 0',
+            padding: '6px 8px',
+            maxHeight: 260,
+            overflow: 'auto',
+            fontSize: 10,
+            lineHeight: 1.45,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            background: 'rgba(26,24,19,0.045)',
+            border: '1px solid var(--tm-hair)',
+            borderRadius: 2,
+            color: 'var(--tm-ink-2)',
+          }}
+        >
+          {text}
+        </pre>
+      ) : null}
+    </div>
+  )
+}
+
 function SubLine({ tone, text }: { tone: LogTone; text: string }) {
   const color = TONE_COLOR[tone]
   const glyph = TONE_GLYPH[tone]
@@ -291,7 +474,9 @@ function SubLine({ tone, text }: { tone: LogTone; text: string }) {
         color,
       }}
     >
-      <span style={{ flex: '0 0 auto', width: 10, textAlign: 'center' }}>{glyph}</span>
+      <span style={{ flex: '0 0 auto', width: 10, textAlign: 'center' }}>
+        {glyph}
+      </span>
       <span style={{ wordBreak: 'break-word' }}>{text}</span>
     </div>
   )

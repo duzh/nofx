@@ -201,7 +201,12 @@ export class HttpClient {
       if (serverMessage) {
         return Promise.reject(error)
       }
-      if (!isSilent) {
+      // Optional-data endpoints (paid Vergex signals, chart klines) are
+      // polled continuously; when they fail the panel shows its own empty
+      // state — a global toast on every poll is pure noise.
+      const url = (error.config as any)?.url || ''
+      const isOptionalData = url.includes('/vergex/') || url.includes('/klines')
+      if (!isSilent && !isOptionalData) {
         toast.error('Server Error', {
           id: 'server-error',
           description: 'Please try again later or contact support',
