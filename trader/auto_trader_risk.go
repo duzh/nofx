@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+const (
+	// A position whose profit peaked above this is a "real winner" worth
+	// protecting from round-tripping back to a loss.
+	profitProtectPeakPct = 5.0
+	// Close the winner once it has given back this share of its peak profit.
+	profitProtectGivebackPct = 30.0
+)
+
 // startDrawdownMonitor starts drawdown monitoring
 func (at *AutoTrader) startDrawdownMonitor() {
 	at.monitorWg.Add(1)
@@ -94,8 +102,12 @@ func (at *AutoTrader) checkPositionDrawdown() {
 			drawdownPct = ((peakPnLPct - currentPnLPct) / peakPnLPct) * 100
 		}
 
-		// Check close position condition: profit > 5% and drawdown >= 40%
-		if currentPnLPct > 5.0 && drawdownPct >= 40.0 {
+		// Close a real winner (peak > +5%) once it gives back >= 30% of its
+		// peak, locking the gain in. Gate on PEAK profit, not current: the
+		// old `current > 5%` gate disarmed protection exactly when a winner
+		// decayed below +5%, letting a +13% peak ride all the way back to a
+		// loss before anything triggered.
+		if peakPnLPct > profitProtectPeakPct && drawdownPct >= profitProtectGivebackPct {
 			logger.Infof("🚨 Drawdown close position condition triggered: %s %s | Current profit: %.2f%% | Peak profit: %.2f%% | Drawdown: %.2f%%",
 				symbol, side, currentPnLPct, peakPnLPct, drawdownPct)
 
@@ -107,7 +119,7 @@ func (at *AutoTrader) checkPositionDrawdown() {
 				// Clear cache for this position after closing
 				at.ClearPeakPnLCache(symbol, side)
 			}
-		} else if currentPnLPct > 5.0 {
+		} else if peakPnLPct > profitProtectPeakPct {
 			// Record situations close to close position condition (for debugging)
 			logger.Infof("📊 Drawdown monitoring: %s %s | Profit: %.2f%% | Peak: %.2f%% | Drawdown: %.2f%%",
 				symbol, side, currentPnLPct, peakPnLPct, drawdownPct)

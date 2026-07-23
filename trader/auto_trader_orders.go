@@ -147,11 +147,14 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 	posKey := decision.Symbol + "_long"
 	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 
-	// Set stop loss and take profit
-	if err := at.trader.SetStopLoss(decision.Symbol, "LONG", quantity, decision.StopLoss); err != nil {
+	// Set stop loss and take profit (hair-trigger stops widened in code —
+	// the model sometimes emits stops <0.1% from entry, which just donate
+	// fees; the strategy contract is a wide stop, distant target).
+	stopLoss, takeProfit := clampProtectiveStops("LONG", marketData.CurrentPrice, decision.StopLoss, decision.TakeProfit)
+	if err := at.trader.SetStopLoss(decision.Symbol, "LONG", quantity, stopLoss); err != nil {
 		logger.Infof("  ⚠ Failed to set stop loss: %v", err)
 	}
-	if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, decision.TakeProfit); err != nil {
+	if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, takeProfit); err != nil {
 		logger.Infof("  ⚠ Failed to set take profit: %v", err)
 	}
 
@@ -263,11 +266,12 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 	posKey := decision.Symbol + "_short"
 	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 
-	// Set stop loss and take profit
-	if err := at.trader.SetStopLoss(decision.Symbol, "SHORT", quantity, decision.StopLoss); err != nil {
+	// Set stop loss and take profit (hair-trigger stops widened in code).
+	stopLoss, takeProfit := clampProtectiveStops("SHORT", marketData.CurrentPrice, decision.StopLoss, decision.TakeProfit)
+	if err := at.trader.SetStopLoss(decision.Symbol, "SHORT", quantity, stopLoss); err != nil {
 		logger.Infof("  ⚠ Failed to set stop loss: %v", err)
 	}
-	if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, decision.TakeProfit); err != nil {
+	if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, takeProfit); err != nil {
 		logger.Infof("  ⚠ Failed to set take profit: %v", err)
 	}
 
@@ -400,4 +404,50 @@ func (at *AutoTrader) executeCloseShortWithRecord(decision *kernel.Decision, act
 
 	logger.Infof("  ✓ Position closed successfully")
 	return nil
+}
+
+// Minimum protective-order distances from current price. The AI is guided to
+// a ~-5% stop / +10-12% target; anything under these floors is a hair-trigger
+// order that converts market noise directly into fees (observed live: a short
+// with a stop 0.09% from entry, stopped out in 6 minutes).
+const (
+	minStopLossDistancePct   = 2.0
+	minTakeProfitDistancePct = 3.0
+)
+
+// clampProtectiveStops widens stop-loss/take-profit levels that sit closer to
+// the current price than the configured floors. Zero/absent levels pass
+// through untouched (the caller treats 0 as "no order"). side is "LONG" or
+// "SHORT".
+func clampProtectiveStops(side string, price, stopLoss, takeProfit float64) (float64, float64) {
+	if price <= 0 {
+		return stopLoss, takeProfit
+	}
+	slFloor := price * minStopLossDistancePct / 100
+	tpFloor := price * minTakeProfitDistancePct / 100
+
+	if side == "LONG" {
+		if stopLoss > 0 && stopLoss > price-slFloor {
+			clamped := price - slFloor
+			logger.Infof("  🛡 Stop-loss %.6f too close to price %.6f — widened to %.6f (-%.1f%%)", stopLoss, price, clamped, minStopLossDistancePct)
+			stopLoss = clamped
+		}
+		if takeProfit > 0 && takeProfit < price+tpFloor {
+			clamped := price + tpFloor
+			logger.Infof("  🛡 Take-profit %.6f too close to price %.6f — widened to %.6f (+%.1f%%)", takeProfit, price, clamped, minTakeProfitDistancePct)
+			takeProfit = clamped
+		}
+	} else {
+		if stopLoss > 0 && stopLoss < price+slFloor {
+			clamped := price + slFloor
+			logger.Infof("  🛡 Stop-loss %.6f too close to price %.6f — widened to %.6f (+%.1f%%)", stopLoss, price, clamped, minStopLossDistancePct)
+			stopLoss = clamped
+		}
+		if takeProfit > 0 && takeProfit > price-tpFloor {
+			clamped := price - tpFloor
+			logger.Infof("  🛡 Take-profit %.6f too close to price %.6f — widened to %.6f (-%.1f%%)", takeProfit, price, clamped, minTakeProfitDistancePct)
+			takeProfit = clamped
+		}
+	}
+	return stopLoss, takeProfit
 }
