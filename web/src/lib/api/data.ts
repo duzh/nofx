@@ -437,6 +437,19 @@ export const dataApi = {
     return result.data!
   },
 
+  async getOrders(
+    traderId: string,
+    limit: number = 100,
+    silent?: boolean
+  ): Promise<any[]> {
+    const result = await httpClient.request<any[]>(
+      `${API_BASE}/orders?trader_id=${traderId}&limit=${limit}`,
+      { silent }
+    )
+    if (!result.success) throw new Error('Failed to fetch orders')
+    return result.data!
+  },
+
   async getPositionHistory(
     traderId: string,
     limit: number = 100,

@@ -15,6 +15,7 @@ import { OrderBook } from './OrderBook'
 import { LiquidationMap } from './LiquidationMap'
 import { KlineChart } from './KlineChart'
 import { ExecutionLog } from './ExecutionLog'
+import { OrderFlow } from './OrderFlow'
 import { SignalMatrix } from './SignalMatrix'
 import { RiskRadar } from './RiskRadar'
 import { EdgeProfile } from './EdgeProfile'
@@ -579,6 +580,12 @@ export function TerminalDashboard({
               </table>
             ) : <div className="tm-sc" style={{ padding: '8px 0' }}>No closed trades yet.</div>}
           </div>
+        </div>
+        <div className="tm-rule" />
+
+        {/* ── order flow: raw executed order history, full width ── */}
+        <div style={sc}>
+          <OrderFlow traderId={traderId} />
         </div>
         <div className="tm-rule" />
 
