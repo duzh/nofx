@@ -13,7 +13,6 @@ import HeaderBar from '../components/common/HeaderBar'
 import { SiteFooter } from '../components/common/SiteFooter'
 import { LoginRequiredOverlay } from '../components/auth/LoginRequiredOverlay'
 import { LoginPage } from '../components/auth/LoginPage'
-import { RegisterPage } from '../components/auth/RegisterPage'
 import { ResetPasswordPage } from '../components/auth/ResetPasswordPage'
 import { SetupPage } from '../components/modals/SetupPage'
 import { CompetitionPage } from '../components/trader/CompetitionPage'
@@ -400,7 +399,8 @@ export function AppRoutes() {
       <Routes>
         <Route path={ROUTES.home} element={<LandingPage />} />
         <Route path={ROUTES.login} element={<LoginPage />} />
-        <Route path={ROUTES.register} element={<RegisterPage />} />
+        {/* single-user instance: registration is closed (backend enforces too) */}
+        <Route path={ROUTES.register} element={<Navigate to={ROUTES.login} replace />} />
         <Route path={ROUTES.resetPassword} element={<ResetPasswordPage />} />
         <Route
           path={ROUTES.setup}

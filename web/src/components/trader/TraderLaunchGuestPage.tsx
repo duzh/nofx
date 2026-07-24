@@ -19,7 +19,7 @@ const setupSteps = [
       'Your account keeps the Autopilot configuration, wallet authorization state, and trading dashboard in one place.',
     icon: KeyRound,
     action: 'Create account',
-    to: ROUTES.register,
+    to: ROUTES.login,
   },
   {
     title: 'Fund the AI fee wallet',
@@ -88,7 +88,7 @@ export function TraderLaunchGuestPage() {
                 <ArrowRight className="h-4 w-4" />
               </Link>
               <Link
-                to={ROUTES.register}
+                to={ROUTES.login}
                 className="inline-flex items-center justify-center rounded-xl border border-nofx-gold/20 bg-nofx-bg-deeper px-5 py-3 text-sm font-semibold text-nofx-text transition hover:border-nofx-gold/40 hover:bg-nofx-bg-deeper"
               >
                 Create account

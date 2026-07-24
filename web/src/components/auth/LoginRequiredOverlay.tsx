@@ -127,7 +127,7 @@ export function LoginRequiredOverlay({
                     </Link>
 
                     <Link
-                      to="/register"
+                      to="/login"
                       className="flex items-center justify-center gap-2 w-full py-3 bg-transparent border border-nofx-gold/20 text-nofx-text-muted hover:text-nofx-text hover:border-nofx-gold font-bold text-xs uppercase tracking-widest transition-all hover:bg-nofx-gold/10"
                     >
                       <UserPlus size={14} />
