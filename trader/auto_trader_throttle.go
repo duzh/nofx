@@ -141,8 +141,20 @@ func (at *AutoTrader) closeThrottleReason(decision kernel.Decision, ctx *kernel.
 	if order := at.findRecentOpenOrder(symbol, side, time.Now().Add(-autopilotNoiseCloseHoldDuration)); order != nil && order.CreatedAt > entryTime {
 		entryTime = order.CreatedAt
 	}
+	if entryTime <= 0 && at.store != nil {
+		// Durable fallback: the position row's entry time survives process
+		// restarts, unlike the in-memory tracking above.
+		if row, err := at.store.Position().GetOpenPositionBySymbol(at.id, symbol, strings.ToUpper(side)); err == nil && row != nil && row.EntryTime > 0 {
+			entryTime = row.EntryTime
+		}
+	}
 	if entryTime <= 0 {
-		return ""
+		// Fail CLOSED. Returning "" here disarmed the hold discipline exactly
+		// when state was weakest — observed live: a deploy restart wiped the
+		// in-memory tracking and the AI market-closed a position 8 minutes
+		// after the identical close had been throttled. Order sync restores
+		// the data within a minute; blocking one cycle is the cheap side.
+		return fmt.Sprintf("trade throttle: %s %s entry time unknown (fresh restart?) — blocking close until position data is restored", symbol, side)
 	}
 
 	heldFor := time.Since(time.UnixMilli(entryTime))
