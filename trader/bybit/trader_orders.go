@@ -1,7 +1,11 @@
 package bybit
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +14,7 @@ import (
 	"nofx/trader/types"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // OpenLong opens a long position
@@ -280,97 +285,88 @@ func (t *BybitTrader) GetMarketPrice(symbol string) (float64, error) {
 
 // SetStopLoss sets stop loss order
 func (t *BybitTrader) SetStopLoss(symbol string, positionSide string, quantity, stopPrice float64) error {
-	side := "Sell" // LONG stop loss uses Sell
-	if positionSide == "SHORT" {
-		side = "Buy" // SHORT stop loss uses Buy
+	if stopPrice <= 0 {
+		return nil
 	}
-
-	// Get current price to determine triggerDirection
-	currentPrice, err := t.GetMarketPrice(symbol)
-	if err != nil {
-		return err
-	}
-
-	triggerDirection := 2 // Price fall trigger (default long stop loss)
-	if stopPrice > currentPrice {
-		triggerDirection = 1 // Price rise trigger (short stop loss)
-	}
-
-	// Use FormatQuantity to format quantity
-	qtyStr, _ := t.FormatQuantity(symbol, quantity)
-
-	params := map[string]interface{}{
-		"category":         "linear",
-		"symbol":           symbol,
-		"side":             side,
-		"orderType":        "Market",
-		"qty":              qtyStr,
-		"triggerPrice":     fmt.Sprintf("%v", stopPrice),
-		"triggerDirection": triggerDirection,
-		"triggerBy":        "LastPrice",
-		"reduceOnly":       true,
-	}
-
-	result, err := t.client.NewUtaBybitServiceWithParams(params).PlaceOrder(context.Background())
-	if err != nil {
+	if err := t.setTradingStop(symbol, "stopLoss", stopPrice); err != nil {
 		return fmt.Errorf("failed to set stop loss: %w", err)
 	}
-
-	if result.RetCode != 0 {
-		return fmt.Errorf("failed to set stop loss: %s", result.RetMsg)
-	}
-
-	logger.Infof("  ✓ [Bybit] Stop loss order set: %s @ %.2f", symbol, stopPrice)
+	logger.Infof("  \u2713 [Bybit] Position stop-loss attached: %s @ %v", symbol, stopPrice)
 	return nil
 }
 
-// SetTakeProfit sets take profit order
+// SetTakeProfit sets take profit on the position
 func (t *BybitTrader) SetTakeProfit(symbol string, positionSide string, quantity, takeProfitPrice float64) error {
-	side := "Sell" // LONG take profit uses Sell
-	if positionSide == "SHORT" {
-		side = "Buy" // SHORT take profit uses Buy
+	if takeProfitPrice <= 0 {
+		return nil
 	}
+	if err := t.setTradingStop(symbol, "takeProfit", takeProfitPrice); err != nil {
+		return fmt.Errorf("failed to set take profit: %w", err)
+	}
+	logger.Infof("  \u2713 [Bybit] Position take-profit attached: %s @ %v", symbol, takeProfitPrice)
+	return nil
+}
 
-	// Get current price to determine triggerDirection
-	currentPrice, err := t.GetMarketPrice(symbol)
+// setTradingStop attaches a protective price to the position itself via
+// POST /v5/position/trading-stop (tpslMode Full). Unlike the standalone
+// conditional orders this replaced, position-attached stops are reported on
+// the position object (so the dashboard SL/TP column has data) and vanish
+// together with the position instead of lingering as orphan orders.
+func (t *BybitTrader) setTradingStop(symbol, field string, price float64) error {
+	payload := map[string]interface{}{
+		"category":    "linear",
+		"symbol":      symbol,
+		field:         fmt.Sprintf("%v", price),
+		"tpslMode":    "Full",
+		"positionIdx": 0,
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 
-	triggerDirection := 1 // Price rise trigger (default long take profit)
-	if takeProfitPrice < currentPrice {
-		triggerDirection = 2 // Price fall trigger (short take profit)
-	}
+	timestamp := fmt.Sprintf("%d", time.Now().UnixMilli())
+	recvWindow := "5000"
+	signPayload := timestamp + t.apiKey + recvWindow + string(body)
+	h := hmac.New(sha256.New, []byte(t.secretKey))
+	h.Write([]byte(signPayload))
+	signature := hex.EncodeToString(h.Sum(nil))
 
-	// Use FormatQuantity to format quantity
-	qtyStr, _ := t.FormatQuantity(symbol, quantity)
-
-	params := map[string]interface{}{
-		"category":         "linear",
-		"symbol":           symbol,
-		"side":             side,
-		"orderType":        "Market",
-		"qty":              qtyStr,
-		"triggerPrice":     fmt.Sprintf("%v", takeProfitPrice),
-		"triggerDirection": triggerDirection,
-		"triggerBy":        "LastPrice",
-		"reduceOnly":       true,
-	}
-
-	result, err := t.client.NewUtaBybitServiceWithParams(params).PlaceOrder(context.Background())
+	req, err := http.NewRequest("POST", "https://api.bybit.com/v5/position/trading-stop", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("failed to set take profit: %w", err)
+		return err
 	}
+	req.Header.Set("X-BAPI-API-KEY", t.apiKey)
+	req.Header.Set("X-BAPI-SIGN", signature)
+	req.Header.Set("X-BAPI-SIGN-TYPE", "2")
+	req.Header.Set("X-BAPI-TIMESTAMP", timestamp)
+	req.Header.Set("X-BAPI-RECV-WINDOW", recvWindow)
+	req.Header.Set("Content-Type", "application/json")
 
-	if result.RetCode != 0 {
-		return fmt.Errorf("failed to set take profit: %s", result.RetMsg)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
 	}
+	defer resp.Body.Close()
 
-	logger.Infof("  ✓ [Bybit] Take profit order set: %s @ %.2f", symbol, takeProfitPrice)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	var result struct {
+		RetCode int    `json:"retCode"`
+		RetMsg  string `json:"retMsg"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return err
+	}
+	// 34040 = "not modified" (same value already attached) — not a failure.
+	if result.RetCode != 0 && result.RetCode != 34040 {
+		return fmt.Errorf("trading-stop %s rejected: retCode=%d msg=%s", field, result.RetCode, result.RetMsg)
+	}
 	return nil
 }
 
-// CancelStopLossOrders cancels stop loss orders
 func (t *BybitTrader) CancelStopLossOrders(symbol string) error {
 	return t.cancelConditionalOrders(symbol, "StopLoss")
 }
