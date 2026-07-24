@@ -726,7 +726,9 @@ export function TerminalDashboard({
             fontSize: 10,
           }}
         >
-          <span style={{ color: 'var(--tm-muted)', marginRight: 2 }}>Instrument</span>
+          <span style={{ color: 'var(--tm-muted)', marginRight: 2 }}>
+            Instrument
+          </span>
           {(() => {
             const heldSet = new Set(
               (positions ?? []).map((p) => baseLabel(p.symbol)).filter(Boolean)
@@ -755,7 +757,9 @@ export function TerminalDashboard({
                     borderRadius: 2,
                     border: `1px solid ${isActive ? 'var(--tm-ink)' : 'var(--tm-hair)'}`,
                     background: isActive ? 'var(--tm-ink)' : 'transparent',
-                    color: isActive ? 'var(--tm-paper, #f5f1e6)' : 'var(--tm-ink-2)',
+                    color: isActive
+                      ? 'var(--tm-paper, #f5f1e6)'
+                      : 'var(--tm-ink-2)',
                     fontWeight: isHeld ? 700 : 400,
                   }}
                 >
@@ -978,6 +982,9 @@ export function TerminalDashboard({
                       size
                     </td>
                     <td style={{ padding: '0 0 3px', textAlign: 'right' }}>
+                      SL / TP
+                    </td>
+                    <td style={{ padding: '0 0 3px', textAlign: 'right' }}>
                       PnL
                     </td>
                     <td style={{ padding: '0 0 3px', textAlign: 'right' }}>
@@ -1026,6 +1033,22 @@ export function TerminalDashboard({
                           }}
                         >
                           {fmtUsd(notional)}
+                        </td>
+                        <td
+                          style={{
+                            padding: '5px 0',
+                            textAlign: 'right',
+                            color: 'var(--tm-muted)',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <span className="tm-dn">
+                            {p.stop_loss ? fmtPx(p.stop_loss) : '—'}
+                          </span>
+                          {' / '}
+                          <span className="tm-up">
+                            {p.take_profit ? fmtPx(p.take_profit) : '—'}
+                          </span>
                         </td>
                         <td
                           style={{ padding: '5px 0', textAlign: 'right' }}

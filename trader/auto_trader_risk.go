@@ -321,6 +321,9 @@ func (at *AutoTrader) countTradablePositions(positions []map[string]interface{})
 	count := 0
 	for _, pos := range positions {
 		qty, _ := pos["positionAmt"].(float64)
+		if qty < 0 {
+			qty = -qty // shorts carry negative positionAmt on some adapters
+		}
 		price, _ := pos["markPrice"].(float64)
 		if price <= 0 {
 			price, _ = pos["entryPrice"].(float64)

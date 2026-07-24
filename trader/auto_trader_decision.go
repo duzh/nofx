@@ -235,6 +235,10 @@ func (at *AutoTrader) GetPositions() ([]map[string]interface{}, error) {
 		// Calculate P&L percentage (based on margin)
 		pnlPct := calculatePnLPercentage(unrealizedPnl, marginUsed)
 
+		// Exchange-side SL/TP when the adapter provides them (0 = not set)
+		stopLoss, _ := pos["stopLoss"].(float64)
+		takeProfit, _ := pos["takeProfit"].(float64)
+
 		result = append(result, map[string]interface{}{
 			"symbol":             symbol,
 			"side":               side,
@@ -246,6 +250,8 @@ func (at *AutoTrader) GetPositions() ([]map[string]interface{}, error) {
 			"unrealized_pnl_pct": pnlPct,
 			"liquidation_price":  liquidationPrice,
 			"margin_used":        marginUsed,
+			"stop_loss":          stopLoss,
+			"take_profit":        takeProfit,
 		})
 	}
 

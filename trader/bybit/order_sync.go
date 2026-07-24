@@ -323,7 +323,10 @@ func (t *BybitTrader) reconcilePositions(exchangeID string, positionStore *store
 			symbol, _ := pos["symbol"].(string)
 			side, _ := pos["side"].(string)
 			qty, _ := pos["positionAmt"].(float64)
-			if symbol == "" || qty <= 0 {
+			if qty < 0 {
+				qty = -qty // Bybit shorts carry negative positionAmt
+			}
+			if symbol == "" || qty == 0 {
 				continue
 			}
 			m[store.LivePositionKey(symbol, side)] += qty

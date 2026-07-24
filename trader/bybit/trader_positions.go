@@ -75,6 +75,12 @@ func (t *BybitTrader) GetPositions() ([]map[string]interface{}, error) {
 		liqPriceStr, _ := pos["liqPrice"].(string)
 		liqPrice, _ := strconv.ParseFloat(liqPriceStr, 64)
 
+		// Exchange-side protective orders attached to the position
+		takeProfitStr, _ := pos["takeProfit"].(string)
+		takeProfit, _ := strconv.ParseFloat(takeProfitStr, 64)
+		stopLossStr, _ := pos["stopLoss"].(string)
+		stopLoss, _ := strconv.ParseFloat(stopLossStr, 64)
+
 		// Position created/updated time (milliseconds timestamp)
 		createdTimeStr, _ := pos["createdTime"].(string)
 		createdTime, _ := strconv.ParseInt(createdTimeStr, 10, 64)
@@ -107,6 +113,8 @@ func (t *BybitTrader) GetPositions() ([]map[string]interface{}, error) {
 			"unRealizedProfit": unrealisedPnl,
 			"unrealizedPnL":    unrealisedPnl,
 			"liquidationPrice": liqPrice,
+			"takeProfit":       takeProfit,
+			"stopLoss":         stopLoss,
 			"leverage":         leverage,
 			"createdTime":      createdTime, // Position open time (ms)
 			"updatedTime":      updatedTime, // Position last update time (ms)
