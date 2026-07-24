@@ -19,7 +19,12 @@ const (
 )
 
 var (
-	DefaultTimeout = 120 * time.Second
+	// 180s: reasoning models (DeepSeek with full OI/funding context) average
+	// 45-60s per decision with a long tail — two consecutive live cycles blew
+	// through the previous 120s ceiling while the upstream was merely slow,
+	// not down. A decision cycle runs every 15m, so the extra headroom costs
+	// no scheduling pressure.
+	DefaultTimeout = 180 * time.Second
 
 	MaxRetryTimes = 3
 
