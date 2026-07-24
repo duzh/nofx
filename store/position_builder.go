@@ -107,10 +107,48 @@ func (pb *PositionBuilder) handleClose(
 	}
 
 	if position == nil {
-		// No open position found - just skip
-		// This can happen if trades are processed out of order or database was cleared
-		logger.Infof("  ⚠️  No matching open position for %s %s (orderID: %s), skipping", symbol, side, orderID)
-		return nil
+		// Orphan close: the fill's OPEN row is gone (row lifecycle mishap —
+		// e.g. a reconcile pass closed it before this fill arrived). Silently
+		// skipping loses the trade's realized PnL from every statistic, so
+		// reconstruct the entry from the most recent matching open order and
+		// record a CLOSED row directly.
+		entryPrice, entryTimeMs := pb.lookupRecentOpenFill(traderID, symbol, side, tradeTimeMs)
+		if entryPrice <= 0 {
+			logger.Infof("  ⚠️  No matching open position or open order for %s %s (orderID: %s), skipping", symbol, side, orderID)
+			return nil
+		}
+		pnl := realizedPnL
+		if pnl == 0 {
+			if side == "LONG" {
+				pnl = (price - entryPrice) * quantity
+			} else {
+				pnl = (entryPrice - price) * quantity
+			}
+			pnl = math.Round(pnl*100) / 100
+		}
+		if entryTimeMs <= 0 {
+			entryTimeMs = tradeTimeMs
+		}
+		logger.Infof("  🩹 Orphan close healed: %s %s %.6f entry %.6f → exit %.6f, PnL %.2f (orderID: %s)",
+			symbol, side, quantity, entryPrice, price, pnl, orderID)
+		return pb.positionStore.Create(&TraderPosition{
+			TraderID:      traderID,
+			ExchangeID:    exchangeID,
+			ExchangeType:  exchangeType,
+			Symbol:        symbol,
+			Side:          side,
+			Quantity:      0,
+			EntryQuantity: quantity,
+			EntryPrice:    entryPrice,
+			ExitPrice:     price,
+			RealizedPnL:   pnl,
+			Fee:           fee,
+			Status:        "CLOSED",
+			CloseReason:   "orphan_heal",
+			EntryTime:     entryTimeMs,
+			ExitTime:      tradeTimeMs,
+			ExitOrderID:   orderID,
+		})
 	}
 
 	const QUANTITY_TOLERANCE = 0.0001
@@ -178,4 +216,33 @@ func (pb *PositionBuilder) handleClose(
 func quantitiesMatch(a, b float64) bool {
 	const QUANTITY_TOLERANCE = 0.0001
 	return math.Abs(a-b) < QUANTITY_TOLERANCE
+}
+
+// lookupRecentOpenFill finds the most recent open fill for symbol+side before
+// closeTimeMs in the orders ledger. Used to heal orphan closes whose OPEN
+// position row was lost, so their realized PnL still reaches the statistics.
+func (pb *PositionBuilder) lookupRecentOpenFill(traderID, symbol, side string, closeTimeMs int64) (float64, int64) {
+	action := "open_long"
+	if side == "SHORT" {
+		action = "open_short"
+	}
+	var row struct {
+		AvgFillPrice float64
+		Price        float64
+		CreatedAt    int64
+	}
+	err := pb.positionStore.db.Table("trader_orders").
+		Select("avg_fill_price, price, created_at").
+		Where("trader_id = ? AND symbol = ? AND order_action = ? AND created_at <= ?", traderID, symbol, action, closeTimeMs).
+		Order("created_at DESC").
+		Limit(1).
+		Scan(&row).Error
+	if err != nil {
+		return 0, 0
+	}
+	price := row.AvgFillPrice
+	if price <= 0 {
+		price = row.Price
+	}
+	return price, row.CreatedAt
 }
