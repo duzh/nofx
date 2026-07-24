@@ -52,8 +52,9 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 		return fmt.Errorf("failed to get positions: %w", err)
 	}
 
-	// [CODE ENFORCED] Check max positions limit
-	if err := at.enforceMaxPositions(len(positions)); err != nil {
+	// [CODE ENFORCED] Check max positions limit (dust remnants below the
+	// minimum position size do not occupy a slot)
+	if err := at.enforceMaxPositions(at.countTradablePositions(positions)); err != nil {
 		return err
 	}
 
@@ -171,8 +172,9 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 		return fmt.Errorf("failed to get positions: %w", err)
 	}
 
-	// [CODE ENFORCED] Check max positions limit
-	if err := at.enforceMaxPositions(len(positions)); err != nil {
+	// [CODE ENFORCED] Check max positions limit (dust remnants below the
+	// minimum position size do not occupy a slot)
+	if err := at.enforceMaxPositions(at.countTradablePositions(positions)); err != nil {
 		return err
 	}
 

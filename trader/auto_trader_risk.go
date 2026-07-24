@@ -309,6 +309,33 @@ func (at *AutoTrader) enforceMinPositionSize(positionSizeUSD float64) error {
 }
 
 // enforceMaxPositions checks maximum positions count (CODE ENFORCED)
+// countTradablePositions counts positions whose notional is at least the
+// strategy's minimum position size. Dust remnants (e.g. 0.1 SOL left behind
+// by a partial exchange-side close) are real holdings but not tradable
+// positions — letting them occupy a MaxPositions slot starves the book.
+func (at *AutoTrader) countTradablePositions(positions []map[string]interface{}) int {
+	minSize := 12.0
+	if at.config.StrategyConfig != nil && at.config.StrategyConfig.RiskControl.MinPositionSize > 0 {
+		minSize = at.config.StrategyConfig.RiskControl.MinPositionSize
+	}
+	count := 0
+	for _, pos := range positions {
+		qty, _ := pos["positionAmt"].(float64)
+		price, _ := pos["markPrice"].(float64)
+		if price <= 0 {
+			price, _ = pos["entryPrice"].(float64)
+		}
+		notional := qty * price
+		if notional >= minSize {
+			count++
+		} else if qty > 0 {
+			symbol, _ := pos["symbol"].(string)
+			logger.Infof("  🧹 Dust position ignored for slot count: %s qty=%.6f notional=%.2f < min %.2f", symbol, qty, notional, minSize)
+		}
+	}
+	return count
+}
+
 func (at *AutoTrader) enforceMaxPositions(currentPositionCount int) error {
 	if at.config.StrategyConfig == nil {
 		return nil
