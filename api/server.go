@@ -721,7 +721,11 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 
 // Start Start server
 func (s *Server) Start() error {
-	addr := fmt.Sprintf(":%d", s.port)
+	// API_SERVER_HOST binds the listener to a specific interface. Production
+	// file deploys sit behind nginx and must bind 127.0.0.1 — the default
+	// (all interfaces) exposes the plaintext API to the public internet.
+	host := os.Getenv("API_SERVER_HOST")
+	addr := fmt.Sprintf("%s:%d", host, s.port)
 	logger.Infof("🌐 API server starting at http://localhost%s", addr)
 	logger.Infof("📊 API Documentation:")
 	logger.Infof("  • GET  /api/health           - Health check")

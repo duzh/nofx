@@ -116,6 +116,7 @@ Type=simple
 WorkingDirectory=$DEPLOY_PATH
 ExecStart=$DEPLOY_PATH/nofx-server
 Environment=API_SERVER_PORT=$APP_PORT
+Environment=API_SERVER_HOST=127.0.0.1
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
