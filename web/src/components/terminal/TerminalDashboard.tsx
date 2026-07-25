@@ -1271,6 +1271,43 @@ export function TerminalDashboard({
                 Net by hold time &amp; side · after fees
               </span>
             </div>
+            {fullStats && fullStats.total_trades > 0 ? (
+              <div
+                className="tm-sc"
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 12,
+                  fontSize: 10,
+                  padding: '0 0 6px',
+                  color: 'var(--tm-ink-2)',
+                }}
+              >
+                <span>
+                  Trades <b>{fullStats.total_trades}</b>
+                </span>
+                <span className="tm-up">W {fullStats.win_trades}</span>
+                <span className="tm-dn">L {fullStats.loss_trades}</span>
+                <span>Win {fullStats.win_rate.toFixed(1)}%</span>
+                <span>
+                  R{' '}
+                  {fullStats.avg_loss > 0
+                    ? (fullStats.avg_win / fullStats.avg_loss).toFixed(2)
+                    : '—'}
+                </span>
+                <span>PF {fullStats.profit_factor.toFixed(2)}</span>
+                <span>
+                  AvgW +{fullStats.avg_win.toFixed(2)} / AvgL -
+                  {fullStats.avg_loss.toFixed(2)}
+                </span>
+                <span className={fullStats.total_pnl >= 0 ? 'tm-up' : 'tm-dn'}>
+                  PnL {fullStats.total_pnl >= 0 ? '+' : ''}
+                  {fullStats.total_pnl.toFixed(2)}
+                </span>
+                <span>Fees {fullStats.total_fee.toFixed(2)}</span>
+                <span>MaxDD {fullStats.max_drawdown_pct.toFixed(1)}%</span>
+              </div>
+            ) : null}
             <EdgeProfile positions={history?.positions} />
           </div>
         </div>
