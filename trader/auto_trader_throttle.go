@@ -135,6 +135,19 @@ func (at *AutoTrader) closeThrottleReason(decision kernel.Decision, ctx *kernel.
 	entryTime := int64(0)
 	if pos != nil {
 		pnlPct = pos.UnrealizedPnLPct
+	}
+
+	// The durable position row is the authoritative entry time. The exchange
+	// position's UpdateTime is NOT an entry time — Bybit refreshes it on
+	// every funding settlement (00/08/16 UTC), which reset the hold clock of
+	// an 8h50m-old position to 46m live and would re-lock the noise window
+	// after every settlement for as long as the position is held.
+	if at.store != nil {
+		if row, err := at.store.Position().GetOpenPositionBySymbol(at.id, symbol, strings.ToUpper(side)); err == nil && row != nil && row.EntryTime > 0 {
+			entryTime = row.EntryTime
+		}
+	}
+	if entryTime <= 0 && pos != nil {
 		entryTime = pos.UpdateTime
 	}
 
