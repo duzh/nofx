@@ -108,6 +108,14 @@ func (t *BybitTrader) parseTradesResult(list []map[string]interface{}) ([]BybitT
 	var trades []BybitTrade
 
 	for _, item := range list {
+		// Only real executions build positions. Bybit's execution list also
+		// carries funding settlements (execType=Funding, qty = full position,
+		// every 8h at 00/08/16 UTC) and settle records — ingesting those as
+		// fills doubled ledger rows and reset the throttle's hold clock
+		// (observed live at the 08:00 UTC funding tick).
+		if et, _ := item["execType"].(string); et != "" && et != "Trade" && et != "AdlTrade" && et != "BustTrade" {
+			continue
+		}
 		symbol, _ := item["symbol"].(string)
 		orderID, _ := item["orderId"].(string)
 		execID, _ := item["execId"].(string)
